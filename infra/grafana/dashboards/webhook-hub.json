@@ -1,0 +1,71 @@
+{
+  "title": "Webhook Hub Dashboard",
+  "uid": "webhook-hub-v1",
+  "panels": [
+    {
+      "title": "Delivery Rate (req/s)",
+      "targets": [
+        {
+          "expr": "rate(webhook_delivery_total[1m])",
+          "legendFormat": "{{status}} - {{source}}"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "type": "graph"
+    },
+    {
+      "title": "Delivery Latency p50/p95/p99",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, rate(webhook_delivery_latency_ms_bucket[5m]))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(webhook_delivery_latency_ms_bucket[5m]))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, rate(webhook_delivery_latency_ms_bucket[5m]))",
+          "legendFormat": "p99"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "type": "graph"
+    },
+    {
+      "title": "Queue Lag (seconds)",
+      "targets": [
+        {
+          "expr": "webhook_queue_lag",
+          "legendFormat": "lag"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 8, "w": 8, "h": 8 },
+      "type": "graph"
+    },
+    {
+      "title": "Error Rate",
+      "targets": [
+        {
+          "expr": "rate(webhook_error_total[5m])",
+          "legendFormat": "{{error_type}} - {{source}}"
+        }
+      ],
+      "gridPos": { "x": 8, "y": 8, "w": 8, "h": 8 },
+      "type": "graph"
+    },
+    {
+      "title": "Circuit Breaker State",
+      "targets": [
+        {
+          "expr": "circuit_breaker_state",
+          "legendFormat": "{{destination}}"
+        }
+      ],
+      "gridPos": { "x": 16, "y": 8, "w": 8, "h": 8 },
+      "type": "stat"
+    }
+  ],
+  "schemaVersion": 16,
+  "version": 1
+}

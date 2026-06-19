@@ -1,0 +1,14 @@
+{
+  "name": "@webhook-hub/shared",
+  "version": "1.0.0",
+  "description": "Shared types, DTOs and interfaces for Webhook Hub",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "jest --config ../../jest.config.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}
