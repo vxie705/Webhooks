@@ -8,7 +8,7 @@
     "apps/*"
   ],
   "scripts": {
-    "build": "npm run build --workspaces",
+    "build": "tsc -b packages/shared packages/database apps/ingestor apps/worker",
     "lint": "eslint . --ext .ts",
     "format": "prettier --write \"**/*.ts\"",
     "test": "npm run test --workspaces --if-present"
