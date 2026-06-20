@@ -1,25 +1,26 @@
-FROM node:20-alpine AS builder
+FROM node:20-alpine
 
 WORKDIR /app
 
-COPY package.json tsconfig.base.json ./
+# 1. Copiar todos los archivos de configuración de la raíz y subcarpetas
+# Permite que NPM reconozca y mapee todos los workspaces involucrados
+COPY package*.json tsconfig.base.json ./
+COPY packages/shared/package*.json ./packages/shared/
+COPY packages/database/package*.json ./packages/database/
+COPY apps/worker/package*.json ./apps/worker/
+
+# 2. Instalar el árbol de dependencias del monorrepo de forma limpia
+RUN npm install
+
+# 3. Copiar el código fuente real de los módulos requeridos
 COPY packages/shared ./packages/shared
 COPY packages/database ./packages/database
 COPY apps/worker ./apps/worker
 
-RUN npm install --workspaces
+# 4. Compilar secuencialmente en orden estricto de dependencia
 RUN npm run build --workspace=@webhook-hub/shared
 RUN npm run build --workspace=@webhook-hub/database
 RUN npm run build --workspace=@webhook-hub/worker
-
-FROM node:20-alpine AS runner
-
-WORKDIR /app
-
-COPY --from=builder /app/package.json ./
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/packages/shared/dist ./packages/shared/dist
-COPY --from=builder /app/apps/worker/dist ./apps/worker/dist
 
 EXPOSE 3001
 

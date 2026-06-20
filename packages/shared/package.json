@@ -9,6 +9,7 @@
     "test": "jest --config ../../jest.config.js"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "typescript": "^5.4.0"
   }
 }

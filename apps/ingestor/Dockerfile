@@ -1,25 +1,27 @@
-FROM node:20-alpine AS builder
+FROM node:20-alpine
 
 WORKDIR /app
 
-COPY package.json tsconfig.base.json ./
+# 1. Copiar todos los archivos de configuración de la raíz y subcarpetas
+# Esto le permite a NPM mapear absolutamente todos los workspaces registrados
+COPY package*.json tsconfig.base.json ./
+COPY packages/shared/package*.json ./packages/shared/
+COPY packages/database/package*.json ./packages/database/
+COPY apps/ingestor/package*.json ./apps/ingestor/
+
+# 2. Instalar el árbol completo de dependencias del monorrepo
+# Al tener los package.json mapeados, NPM recrea los symlinks perfectos en node_modules
+RUN npm install
+
+# 3. Copiar el código fuente real de los módulos que necesita esta app
 COPY packages/shared ./packages/shared
 COPY packages/database ./packages/database
 COPY apps/ingestor ./apps/ingestor
 
-RUN npm install --workspaces
+# 4. Compilar secuencialmente en orden de dependencia
 RUN npm run build --workspace=@webhook-hub/shared
 RUN npm run build --workspace=@webhook-hub/database
 RUN npm run build --workspace=@webhook-hub/ingestor
-
-FROM node:20-alpine AS runner
-
-WORKDIR /app
-
-COPY --from=builder /app/package.json ./
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/packages/shared/dist ./packages/shared/dist
-COPY --from=builder /app/apps/ingestor/dist ./apps/ingestor/dist
 
 EXPOSE 3000
 
