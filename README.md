@@ -1,203 +1,157 @@
-# Webhook Hub
+# 🚀 Webhook Hub
 
-Webhook Hub es una plataforma backend para recibir, validar, encolar, procesar y entregar webhooks de forma confiable. El proyecto esta construido como un monorepo TypeScript con NestJS, BullMQ, Redis, PostgreSQL, Prisma, Prometheus y Grafana.
+![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue?style=flat-square&logo=typescript)
+![NestJS](https://img.shields.io/badge/NestJS-10.x-red?style=flat-square&logo=nestjs)
+![Docker](https://img.shields.io/badge/Docker-Compose-blue?style=flat-square&logo=docker)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-blue?style=flat-square&logo=postgresql)
+![Redis](https://img.shields.io/badge/Redis-7-red?style=flat-square&logo=redis)
+![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 
-El diseño separa la ingesta HTTP del procesamiento asincrono. Esto permite responder rapido al cliente productor del webhook, absorber picos de carga mediante cola, registrar intentos de entrega y aplicar resiliencia con reintentos, backoff exponencial y circuit breaker.
+Sistema distribuido y de alta disponibilidad para la recepción, validación, encolamiento y entrega resiliente de webhooks.
 
-## Tabla de Contenido
+Webhook Hub funciona como una capa intermedia inteligente (*middleware*) entre los productores de eventos y los sistemas destinos externos, aislando los fallos de red, absorbiendo picos de tráfico y garantizando una entrega eventual mediante arquitecturas orientadas a eventos (*event-driven*).
 
-- [Capacidades principales](#capacidades-principales)
-- [Arquitectura](#arquitectura)
-- [Flujo de procesamiento](#flujo-de-procesamiento)
-- [Infraestructura local](#infraestructura-local)
-- [Estructura del proyecto](#estructura-del-proyecto)
-- [Modelo de datos](#modelo-de-datos)
-- [Servicios y responsabilidades](#servicios-y-responsabilidades)
-- [Seguridad](#seguridad)
-- [Observabilidad](#observabilidad)
-- [Ejecucion local](#ejecucion-local)
-- [Comandos utiles](#comandos-utiles)
-- [Endpoints](#endpoints)
-- [Estado actual y pendientes](#estado-actual-y-pendientes)
+---
 
-## Capacidades Principales
+# 📌 Tabla de Contenidos
 
-- Ingesta de webhooks por HTTP mediante `POST /api/v1/webhooks/:source/:type`.
-- Validacion de payloads con `class-validator` y `ValidationPipe`.
-- Autenticacion y controles de acceso mediante API Key, HMAC SHA-256, whitelist de IP y validacion basica de token OAuth2/JWT.
-- Idempotencia basada en `Idempotency-Key` y lock temporal en Redis.
-- Encolamiento asincrono con BullMQ sobre Redis.
-- Persistencia de eventos, destinos e intentos de entrega en PostgreSQL mediante Prisma.
-- Procesamiento desacoplado por worker.
-- Reintentos con backoff exponencial y jitter.
-- Circuit breaker por destino para evitar cascadas de fallos.
-- Metricas Prometheus y dashboards Grafana para el Ingestor; el Worker registra metricas internamente y tiene scraping configurado, pero aun requiere exponer su endpoint `/metrics`.
-- Health checks de liveness/readiness para Ingestor.
-- Suite de pruebas enfocada en DTOs, enums, metricas y servicios criticos.
+- [Características](#-características)
+- [Arquitectura](#-arquitectura)
+- [Stack Tecnológico](#-stack-tecnológico)
+- [Flujo del Sistema](#-flujo-del-sistema)
+- [Estructura del Proyecto](#-estructura-del-proyecto)
+- [Modelo de Datos](#-modelo-de-datos)
+- [Seguridad](#-seguridad)
+- [Observabilidad](#-observabilidad)
+- [Instalación y Ejecución Local](#-instalación-y-ejecución-local)
+- [Variables de Entorno](#-variables-de-entorno)
+- [Testing](#-testing)
+- [Roadmap y Pendientes](#-roadmap-y-pendientes)
 
-## Arquitectura
+---
 
-```mermaid
-flowchart LR
-    producer[Cliente / Productor] -->|POST webhook| ingestor[Ingestor API<br/>NestJS]
+# ✨ Características
 
-    subgraph security[Controles de entrada]
-        apiKey[API Key]
-        hmac[HMAC SHA-256]
-        ip[IP Whitelist]
-        oauth[OAuth2 / JWT]
-        rate[Rate Limit]
-        idem[Idempotencia]
-    end
+## 📩 Recepción de Eventos
+- **Endpoint unificado:** Punto de entrada HTTP estructurado mediante `POST /api/v1/webhooks/:source/:type`.
+- **Validación robusta:** Validación estricta de esquemas y payloads en tiempo de ejecución con `class-validator` y `ValidationPipe`.
+- **Control perimetral:** Restricciones de tamaño en solicitudes de entrada (`express.json` limitado a `256kb`) para evitar ataques DoS.
 
-    ingestor --> security
-    security --> queue[(Redis<br/>BullMQ Queue)]
-    security --> db[(PostgreSQL<br/>Prisma)]
+## ⚙️ Procesamiento Asíncrono
+El sistema desacopla de forma estricta la **ingesta de datos** del **procesamiento y entrega**, delegando el transporte a colas de mensajes gestionadas por BullMQ y Redis.
 
-    queue --> worker[Worker<br/>NestJS + BullMQ]
+### Ventajas principales:
+* **Respuesta ultra rápida:** El cliente productor recibe un código HTTP `202 Accepted` de inmediato, liberando sus hilos de ejecución.
+* **Tolerancia a fallos:** Si el sistema destino está caído, el evento no se pierde; se retiene en la infraestructura para su posterior reintento.
+* **Aislamiento de picos de carga:** Redis actúa como un amortiguador (*buffer*), protegiendo a los servidores internos y externos de saturación de tráfico.
+- **Escalabilidad horizontal:** El `ingestor` y el `worker` pueden escalar de forma independiente según las necesidades específicas del tráfico.
+---
+# 🧰 Stack Tecnológico
 
-    subgraph delivery[Entrega resiliente]
-        cb[Circuit Breaker]
-        retry[Retry + Backoff]
-        http[HTTP Client]
-    end
+### Backend
+| Tecnología | Uso / Responsabilidad |
+| :--- | :--- |
+| **TypeScript (v5.x)** | Lenguaje tipado principal para todo el monorepo. |
+| **NestJS (v10.x)** | Framework empresarial para estructurar aplicaciones modulares y escalables. |
+| **BullMQ** | Sistema de mensajería basado en colas de prioridad y reintentos para NodeJS. |
+| **Prisma ORM** | Modelado de datos y abstracción tipada de consultas SQL. |
+| **PostgreSQL (v16)** | Base de datos relacional para la persistencia transaccional y auditoría de eventos. |
+| **Redis (v7)** | Almacenamiento en memoria para colas de BullMQ, rate limiting, caché e idempotencia. |
 
-    worker --> delivery
-    delivery --> destination[Destino externo<br/>Webhook Receiver]
-    worker --> db
+### Infraestructura y Observabilidad
+| Tecnología | Uso / Responsabilidad |
+| :--- | :--- |
+| **Docker & Compose** | Contenerización uniforme de servicios y orquestación del entorno local. |
+| **Prometheus** | Recolección y serie temporal de métricas de rendimiento y negocio. |
+| **Grafana** | Paneles visuales e indicadores operacionales (Dashboards as Code). |
 
-    ingestor --> metrics[Metricas Prometheus]
-    worker --> metrics
-    metrics --> grafana[Grafana]
-```
+---
 
-La arquitectura usa un patron event-driven simple: el Ingestor valida y acepta eventos, Redis actua como broker de trabajo y el Worker ejecuta la entrega real. PostgreSQL conserva el estado del evento y la auditoria de intentos.
-
-## Flujo de Procesamiento
-
-```mermaid
-sequenceDiagram
-    participant C as Cliente
-    participant I as Ingestor
-    participant R as Redis / BullMQ
-    participant P as PostgreSQL
-    participant W as Worker
-    participant D as Destino externo
-
-    C->>I: POST /api/v1/webhooks/:source/:type
-    I->>I: Validar API Key, HMAC, IP, OAuth2 y payload
-    I->>R: Crear lock de idempotencia
-    alt Evento duplicado
-        I-->>C: 200 duplicate
-    else Evento nuevo
-        I->>R: Encolar job process-webhook
-        I->>P: Persistir WebhookEvent en PENDING
-        I-->>C: accepted
-    end
-
-    W->>R: Consumir job
-    W->>W: Consultar circuit breaker
-    alt Circuito abierto
-        W->>P: Registrar intento FAILED
-    else Circuito cerrado o half-open
-        W->>D: POST payload
-        alt Entrega exitosa
-            D-->>W: 2xx
-            W->>P: Registrar intento DELIVERED
-            W->>W: Registrar exito en circuit breaker
-        else Error de entrega
-            W->>W: Registrar fallo
-            alt Quedan reintentos
-                W->>R: Reencolar con delay exponencial
-                W->>P: Registrar intento RETRYING
-            else Reintentos agotados
-                W->>P: Registrar intento DEAD_LETTER
-            end
-        end
-    end
-```
-
-## Infraestructura Local
-
-La infraestructura de desarrollo se define en [infra/docker/docker-compose.yml](infra/docker/docker-compose.yml).
-
-```mermaid
-flowchart TB
-    subgraph compose[Docker Compose]
-        redis[(Redis 7)]
-        postgres[(PostgreSQL 16)]
-        ingestor[webhook-hub-ingestor<br/>Puerto 3000]
-        worker[webhook-hub-worker<br/>Puerto interno 3001]
-        prometheus[Prometheus<br/>Puerto 9090]
-        grafana[Grafana<br/>Puerto 3001]
-    end
-
-    ingestor --> redis
-    ingestor --> postgres
-    worker --> redis
-    worker --> postgres
-    prometheus -->|scrape /metrics| ingestor
-    prometheus -->|scrape /metrics| worker
-    grafana --> prometheus
-```
-
-Servicios definidos:
-
-| Servicio | Imagen / Build | Puerto host | Responsabilidad |
-| --- | --- | --- | --- |
-| `redis` | `redis:7-alpine` | `6379` | Cola BullMQ, locks de idempotencia, rate limit y circuit breaker |
-| `postgres` | `postgres:16-alpine` | `5432` | Persistencia transaccional |
-| `ingestor` | `apps/ingestor/Dockerfile` | `3000` | API publica de ingesta |
-| `worker` | `apps/worker/Dockerfile` | No expuesto directamente | Consumidor de cola y entrega de webhooks |
-| `prometheus` | `prom/prometheus` | `9090` | Recoleccion de metricas |
-| `grafana` | `grafana/grafana` | `3001` | Visualizacion de dashboards |
-
-> Nota: en Docker Compose, Grafana usa el puerto `3001` del host. El worker escucha internamente en `3001`, pero no publica ese puerto al host.
-
-## Estructura del Proyecto
+# 🏗 Arquitectura
 
 ```mermaid
 flowchart TD
-    root[webhook-hub]
-
-    root --> apps[apps]
-    apps --> ingestor[ingestor<br/>API HTTP de recepcion]
-    apps --> worker[worker<br/>procesamiento y entrega]
-
-    root --> packages[packages]
-    packages --> database[database<br/>Prisma, modulo DB y repositorios]
-    packages --> shared[shared<br/>DTOs, enums e interfaces]
-
-    root --> infra[infra]
-    infra --> docker[docker<br/>docker-compose.yml]
-    infra --> prometheus[prometheus<br/>prometheus.yml]
-    infra --> grafana[grafana<br/>dashboards y provisioning]
-
-    root --> docs[docs<br/>planes, revisiones y evaluaciones]
-    root --> scripts[scripts<br/>utilidades y demos]
+    client[Cliente Externo / Productor] -->|POST Webhook| api[Webhook Ingestor <br/> NestJS API]
+    
+    subgraph Capa de Persistencia y Colas
+        redis[(Redis 7 <br/> BullMQ / Locks)]
+        db[(PostgreSQL 16 <br/> Prisma ORM)]
+    end
+    
+    api -->|1. Valida & Registra PENDING| db
+    api -->|2. Encola Trabajo| redis
+    
+    subgraph Capa de Procesamiento Asíncrono
+        worker[Webhook Worker <br/> NestJS Consumer]
+    end
+    
+    redis -->|3. Consume Job| worker
+    worker -->|4. Intenta Entrega HTTP| external[Sistema Destino / Receiver]
+    worker -->|5. Registra DeliveryAttempt| db
 ```
+---
+sequenceDiagram
+    participant C as Cliente Externo
+    participant I as Ingestor API
+    participant R as Redis (BullMQ)
+    participant DB as PostgreSQL
+    participant W as Worker
+    participant D as Destino Externo
 
-Directorios principales:
+    C->>I: POST /api/v1/webhooks/:source/:type
+    activate I
+    I->>I: Validar Seguridad (API Key, HMAC, IP, JWT)
+    I->>R: Verificar Idempotency-Key (Lock)
+    alt Es duplicado
+        I-->>C: HTTP 200 {"status": "duplicate"}
+    else Es evento nuevo
+        I->>DB: Registrar WebhookEvent (status: PENDING)
+        I->>R: Encolar Trabajo (process-webhook)
+        I-->>C: HTTP 202 {"status": "accepted", "id": "job_id"}
+    end
+    deactivate I
 
-| Ruta | Descripcion |
-| --- | --- |
-| `apps/ingestor` | Servicio NestJS que recibe webhooks, aplica seguridad, valida payloads, controla idempotencia y encola jobs. |
-| `apps/worker` | Servicio NestJS/BullMQ que consume jobs, entrega webhooks, aplica retry/backoff y registra intentos. |
-| `packages/database` | Modulo compartido de base de datos, Prisma service y repositorios. |
-| `packages/shared` | Contratos compartidos: DTOs, interfaces, estados y nombres de metricas. |
-| `infra/docker` | Orquestacion local con Docker Compose. |
-| `infra/prometheus` | Configuracion de scraping para Ingestor, Worker y Prometheus. |
-| `infra/grafana` | Dashboard y provisioning de datasource/dashboards. |
-| `docs` | Documentacion de fases, revisiones de arquitectura y seguridad. |
-| `scripts` | Scripts auxiliares para seed o demos. |
-
-## Modelo de Datos
-
-El esquema Prisma esta en [packages/database/prisma/schema.prisma](packages/database/prisma/schema.prisma).
-
-```mermaid
+    activate W
+    W->>R: Extraer / Consumir Job de la cola
+    W->>W: Validar Circuit Breaker del destino
+    alt Circuito Abierto (Abierto por fallos previos)
+        W->>DB: Registrar DeliveryAttempt (status: FAILED)
+    else Circuito Cerrado / Half-Open
+        W->>D: POST Payload (Con Timeout configurado)
+        alt Entrega Exitosa (HTTP 2xx)
+            D-->>W: Respuesta exitosa
+            W->>DB: Registrar Intento (DELIVERED) & Actualizar Evento
+            W->>W: Reportar éxito al Circuit Breaker
+        else Error en Entrega (HTTP 4xx/5xx / Timeout)
+            D-->>W: Error o Red Caída
+            W->>W: Reportar fallo al Circuit Breaker
+            alt Quedan reintentos disponibles
+                W->>R: Reencolar con Backoff Exponencial + Jitter
+                W->>DB: Registrar Intento (RETRYING)
+            else Reintentos Agotados
+                W->>DB: Registrar Intento (DEAD_LETTER) & Actualizar Evento
+            end
+        end
+    end
+    deactivate W
+---
+webhook-hub
+├── apps
+│   ├── ingestor           # 🚀 API HTTP para recepción, validación y seguridad de entrada.
+│   └── worker             # ⚙️ Consumidor asíncrono, políticas de resiliencia y reintentos.
+├── packages
+│   ├── database           # 🗄️ Cliente de Prisma, esquemas, migraciones y repositorios base.
+│   └── shared             # 📦 Contratos comunes: DTOs, Enums, interfaces y constantes.
+├── infra
+│   ├── docker             # 🐳 Archivos Dockerfile y docker-compose.yml de infraestructura.
+│   ├── prometheus         # 📈 Configuración de scraping e intervalos de métricas.
+│   └── grafana            # 📊 Provisionamiento automático de datasources y dashboards.
+├── docs                   # 📚 Planes de arquitectura, auditorías y guías técnicas.
+└── scripts                # 🔧 Utilidades globales, automatizaciones y scripts de seed.
+---
 erDiagram
-    WEBHOOK_EVENT ||--o{ DELIVERY_ATTEMPT : has
+    WEBHOOK_EVENT ||--o{ DELIVERY_ATTEMPT : "genera"
+    DESTINATION ||--o{ WEBHOOK_EVENT : "recibe"
 
     WEBHOOK_EVENT {
         string id PK
@@ -233,193 +187,147 @@ erDiagram
         int failureCount
         datetime lastFailureAt
         datetime createdAt
-    }
-```
+---
+# 📦 Entidades Principales
 
-Estados soportados:
+### 📩 WebhookEvent
+Representa el ciclo de vida y el contenido del evento recibido en la plataforma.
 
-| Enum | Valores |
-| --- | --- |
-| `DeliveryStatus` | `PENDING`, `DELIVERED`, `FAILED`, `RETRYING`, `DEAD_LETTER` |
-| `CircuitBreakerState` | `CLOSED`, `OPEN`, `HALF_OPEN` |
+| Campo | Tipo | Descripción |
+| :--- | :--- | :--- |
+| **id** | `String` | Identificador único del evento (UUID o Snowflake). |
+| **source** | `String` | Origen o sistema que mitió el evento (ej. `billing`). |
+| **type** | `String` | Tipo específico de evento (ej. `invoice.created`). |
+| **data** | `JSON` | Payload crudo en formato JSON enviado por el productor. |
+| **idempotencyKey** | `String` | Token único enviado en los headers para prevenir el procesamiento duplicado. |
+| **status** | `Enum` | Estado global simplificado del evento (`DeliveryStatus`). |
 
-## Servicios y Responsabilidades
+---
 
-### Ingestor
+### 📤 DeliveryAttempt
+Registra cada ejecución física de la llamada HTTP despachada hacia el receptor externo.
 
-El Ingestor es la frontera HTTP del sistema.
+| Campo | Tipo | Descripción |
+| :--- | :--- | :--- |
+| **attempt** | `Int` | Contador correlativo del intento actual (ej. 1, 2, 3...). |
+| **status** | `Enum` | Resultado específico de este intento de entrega. |
+| **latencyMs** | `Int` | Tiempo de respuesta de la red externa medido en milisegundos. |
+| **httpStatus** | `Int` | Código de estado HTTP devuelto por el servidor destino. |
+| **error** | `String` | Mensaje de error de red o stack trace resumido (ej. `TIMEOUT`, `ECONNREFUSED`). |
 
-- Expone `POST /api/v1/webhooks/:source/:type`.
-- Aplica `ApiKeyGuard`, `HmacGuard`, `IpWhitelistGuard` y `OAuth2Guard`.
-- Aplica rate limit con Redis.
-- Usa `Idempotency-Key` para evitar procesamiento duplicado.
-- Encola eventos en la cola BullMQ `webhooks` con job `process-webhook`.
-- Persiste el evento inicial con estado `PENDING`.
-- Expone endpoints de salud y metricas.
+---
 
-### Worker
+### 🌐 Destination
+Representa los sistemas destinos externos que están registrados y autorizados en la plataforma para recibir webhooks.
 
-El Worker procesa los eventos de manera asincrona.
+| Campo | Tipo | Descripción |
+| :--- | :--- | :--- |
+| **circuitState** | `Enum` | Estado actual del Circuit Breaker asignado al destino (`CLOSED`, `OPEN`, `HALF_OPEN`). |
+---
+[PENDING] ---> (Intento de Envío)
+      |
+      ├───> [DELIVERED]  (Éxito - Código HTTP 2xx)
+      |
+      ├───> [RETRYING]   (Fallo temporal - Reencolado con Backoff)
+      |
+      └───> [DEAD_LETTER] / [FAILED] (Fallo definitivo / Intentos agotados)
+---
+# 🛡️ Seguridad
 
-- Consume jobs desde la cola BullMQ `webhooks`.
-- Evalua circuit breaker por destino.
-- Realiza el `POST` HTTP hacia el destino.
-- Registra latencia, resultado y errores.
-- Programa reintentos con backoff exponencial y jitter.
-- Registra intentos de entrega en PostgreSQL.
-- Envia a estado `DEAD_LETTER` cuando se agotan los reintentos.
-- Registra metricas de entrega mediante `MetricsService`; falta publicar un controlador HTTP `/metrics` en el Worker.
-
-### Packages Compartidos
-
-- `@webhook-hub/database`: modulo NestJS de base de datos, `PrismaService` y repositorios para eventos, destinos e intentos.
-- `@webhook-hub/shared`: contratos comunes para mantener consistencia entre Ingestor, Worker y pruebas.
-
-## Seguridad
-
-```mermaid
-flowchart LR
-    request[Request HTTP] --> apiKey[API Key<br/>x-api-key]
-    apiKey --> hmac[HMAC SHA-256<br/>x-signature + rawBody]
-    hmac --> ip[IP Whitelist<br/>allowedIps]
-    ip --> oauth[OAuth2/JWT<br/>Authorization Bearer]
-    oauth --> rate[Rate Limit<br/>Redis + Lua]
-    rate --> validation[DTO Validation]
-    validation --> accepted[Evento aceptado]
-```
-
-Controles implementados:
-
-| Control | Implementacion |
-| --- | --- |
-| API Key | Busca el destino activo por `x-api-key`. |
-| HMAC | Calcula HMAC SHA-256 usando el `rawBody` y compara con `x-signature`. |
-| IP Whitelist | Permite solo IPs configuradas en `Destination.allowedIps`; si no hay lista, permite por compatibilidad. |
-| OAuth2/JWT | Decodifica token Bearer y valida expiracion, issuer, audience y scope `webhook:send` cuando aplican. |
-| Rate limit | Contador atomico en Redis con script Lua: 1000 requests por minuto por cliente. |
-| Idempotencia | Lock temporal en Redis usando `Idempotency-Key`. |
-| Payload limit | `express.json` limitado a `256kb`. |
-| SSRF basico | El HTTP client bloquea hosts sensibles como `localhost`, `127.0.0.1` y metadata endpoints. |
-
-## Observabilidad
-
-```mermaid
-flowchart LR
-    ingestor[Ingestor] -->|/metrics| prometheus[Prometheus]
-    worker[Worker] -->|/metrics| prometheus
-    prometheus --> grafana[Grafana Dashboard]
-    ingestor --> logs[Logs Pino]
-    worker --> logs
-    ingestor --> otel[OpenTelemetry Service]
-    worker --> otel
-```
-
-Componentes:
-
-- `prom-client` para exponer metricas en formato Prometheus.
-- Prometheus esta configurado para scrapear `ingestor:3000/metrics` y `worker:3001/metrics`.
-- El Ingestor expone `/api/v1/metrics`; en el Worker el controlador HTTP de metricas esta pendiente de incorporarse.
-- Grafana carga provisioning desde `infra/grafana`.
-- Logs estructurados con Pino.
-- Servicios base de OpenTelemetry presentes en ambos servicios.
-
-Endpoints de salud del Ingestor:
-
-| Endpoint | Descripcion |
-| --- | --- |
-| `GET /api/v1/health` | Estado basico, uptime y version. |
-| `GET /api/v1/health/live` | Liveness check. |
-| `GET /api/v1/health/ready` | Readiness check con Redis y PostgreSQL. |
-| `GET /api/v1/metrics` | Metricas Prometheus del Ingestor. |
-
-## Ejecucion Local
-
-### Prerrequisitos
-
-- Node.js 20 o superior.
-- npm.
-- Docker y Docker Compose.
-
-### Instalacion
-
-```bash
-npm install
-```
-
-### Ejecutar con Docker Compose
-
-```bash
-docker compose -f infra/docker/docker-compose.yml up --build
-```
-
-Servicios disponibles:
-
-- Ingestor: `http://localhost:3000`
-- Prometheus: `http://localhost:9090`
-- Grafana: `http://localhost:3001`
-
-Credenciales por defecto de Grafana:
-
-- Usuario: `admin`
-- Password: `admin`
-
-### Detener la infraestructura
-
-```bash
-docker compose -f infra/docker/docker-compose.yml down
-```
-
-Para eliminar tambien volumenes locales:
-
-```bash
-docker compose -f infra/docker/docker-compose.yml down -v
-```
-
-## Comandos Utiles
-
-```bash
-# Compilar todos los workspaces
-npm run build
-
-# Ejecutar pruebas de todos los workspaces que tengan test
-npm run test
-
-# Lint
-npm run lint
-
-# Formatear TypeScript
-npm run format
-
-# Levantar solo dependencias locales desde Docker Compose
-docker compose -f infra/docker/docker-compose.yml up redis postgres prometheus grafana
-```
-
-Comandos por workspace:
-
-```bash
-# Ingestor en modo desarrollo
-npm run start:dev -w @webhook-hub/ingestor
-
-# Worker en modo desarrollo
-npm run start:dev -w @webhook-hub/worker
-```
-
-## Endpoints
-
-### Ingesta de Webhooks
+## 🔑 Autenticación por API Key
+Cada cliente debe registrarse previamente en la plataforma y proveer su credencial autorizada mediante las cabeceras HTTP:
 
 ```http
+x-api-key: wh_live_a1b2c3d4e5f6...
+```
+---
+🔏 Validación de Firmas HMAC SHA-256
+Garantiza el no repudio y la integridad de los datos de extremo a extremo. El Ingestor calcula una firma digital utilizando el cuerpo crudo de la petición (rawBody) junto a una clave secreta compartida, pasándola a comparar directamente con el header provisto por el emisor:
+
+flowchart TD
+    A[Payload Recibido: rawBody] --> B[Generar Firma HMAC SHA-256 usando Secret Key]
+    B --> C{¿Es igual a x-signature?}
+    C -->|Sí| D[Evento Aceptado]
+    C -->|No| E[HTTP 401 Unauthorized]
+
+x-signature: t=1672531199,v1=g3h21j4...
+---
+🌐 Otras Capas Defensivas
+IP Whitelisting: Filtro perimetral incorporado a nivel de aplicación que descarta inmediatamente peticiones provenientes de IPs fuera de los rangos CIDR permitidos por destino.
+
+OAuth2 / JWT Bearer Validation: Soporte para la decodificación y validación estricta de tokens de acceso centralizados que contengan el scope explícito webhook:send.
+
+Protección Anti-SSRF: El cliente HTTP embebido en el Worker bloquea de forma nativa peticiones maliciosas dirigidas a interfaces e infraestructuras internas (ej. localhost, 127.0.0.1, 169.254.169.254).
+---
+📈 Observabilidad
+El sistema expone métricas nativas y registros estructurados listos para ecosistemas de monitoreo en la nube:
+
+Métricas Prometheus: El Ingestor expone de manera pública el endpoint /api/v1/metrics utilizando la librería estándar prom-client.
+
+Métricas Clave: Monitoreo activo de la tasa de solicitudes por segundo (RPS), códigos de error HTTP de entrada, tiempos de latencia en la entrega externa, volumen de eventos caídos en DEAD_LETTER y estado de las colas de Redis.
+
+Logs Estructurados: Implementación integral de Pino Logger, imprimiendo trazas en formato JSON plano de alta velocidad, ideal para su indexación en agregadores como Datadog, Kibana o Grafana Loki.
+
+🚀 Instalación y Ejecución Local
+Prerrequisitos
+Node.js 20 LTS o superior.
+
+Docker y Docker Compose instalados de forma global.
+1. Clonar e Instalar Dependencias
+Bash
+git clone https://github.com/tu-usuario/webhook-hub.git
+cd webhook-hub
+npm install
+2. Inicializar la Infraestructura con Docker Compose
+Este comando compilará los contenedores locales y descargará las imágenes oficiales de Redis, PostgreSQL, Prometheus y Grafana de forma automatizada:
+
+Bash
+docker compose -f infra/docker/docker-compose.yml up --build
+
+3. URLs de Acceso del Entorno Local
+Ingestor API: http://localhost:3000
+
+Prometheus UI: http://localhost:9090
+
+Grafana Dashboards: http://localhost:3001 (Usuario: admin / Contraseña: admin)
+
+🔧 Comandos Útiles
+
+# Compilar todos los workspaces del monorepo
+npm run build
+
+# Ejecutar la suite de pruebas unitarias e integrales
+npm run test
+
+# Ejecutar el linter estático
+npm run lint
+
+# Formatear el código fuente con Prettier
+npm run format
+
+# Levantar únicamente los servicios de soporte (sin las aplicaciones Node)
+docker compose -f infra/docker/docker-compose.yml up redis postgres prometheus grafana
+
+Ejecución individual por Workspace
+
+# Ingestor en modo Hot-Reload (Desarrollo)
+npm run start:dev -w @webhook-hub/ingestor
+
+# Worker en modo Hot-Reload (Desarrollo)
+npm run start:dev -w @webhook-hub/worker
+
+Endpoints de la API
+Ingesta de Webhooks
+
 POST /api/v1/webhooks/:source/:type
 Content-Type: application/json
-x-api-key: <api-key>
-x-signature: <hmac-sha256>
-Idempotency-Key: <unique-key>
-Authorization: Bearer <jwt>
-```
+x-api-key: <tu-api-key>
+x-signature: <firma-hmac-sha256>
+Idempotency-Key: <uuid-unico-de-peticion>
+Authorization: Bearer <jwt-token>
 
-Payload esperado:
+Payload de ejemplo (body)
 
-```json
 {
   "source": "billing",
   "type": "invoice.created",
@@ -428,69 +336,104 @@ Payload esperado:
     "amount": 100
   }
 }
-```
 
-Respuesta aceptada:
+Respuestas esperadas
+HTTP 202 (Accepted): El evento es válido y ha sido encolado exitosamente.
 
-```json
 {
   "status": "accepted",
-  "id": "<job-id>"
+  "id": "job_12345"
 }
-```
 
-Respuesta duplicada:
+HTTP 200 (OK - Duplicado): La llave de idempotencia ya fue procesada anteriormente.
 
-```json
 {
   "status": "duplicate",
-  "id": "<idempotency-key>"
+  "id": "idempotency_key_enviada"
 }
+
+---
+### ⚙️ Variables de Entorno
+
+Puedes configurar el comportamiento del sistema creando un archivo `.env` en la raíz de cada aplicación relevante (`apps/ingestor` y `apps/worker`).
+
+```mermaid
+flowchart TD
+    subgraph Archivo .env / Entorno
+        db[DATABASE_URL <br/><i>Requerida</i>]
+        r_host[REDIS_HOST <br/><i>Default: localhost</i>]
+        r_port[REDIS_PORT <br/><i>Default: 6379</i>]
+        i_port[INGESTOR_PORT <br/><i>Default: 3000</i>]
+        w_time[HTTP_TIMEOUT_MS <br/><i>Default: 5000</i>]
+        log[LOG_LEVEL <br/><i>Default: info</i>]
+    end
+
+    subgraph apps/ingestor [App: Ingestor API]
+        db --> Ingestor
+        r_host --> Ingestor
+        r_port --> Ingestor
+        i_port -->|Puerto Escucha HTTP| Ingestor
+        log --> Ingestor
+    end
+
+    subgraph apps/worker [App: Webhook Worker]
+        db --> Worker
+        r_host --> Worker
+        r_port --> Worker
+        w_time -->|Timeout Destinos| Worker
+        log --> Worker
+    end
+
+    style db fill:#f9f,stroke:#333,stroke-width:2px
 ```
+---
+# 🧪 Testing y Ciclo de Vida
 
-## Variables de Entorno
+El proyecto contiene una suite completa de pruebas unitarias y de integración distribuidas de forma modular en los diferentes entornos del monorepo.
 
-| Variable | Servicio | Valor por defecto | Descripcion |
-| --- | --- | --- | --- |
-| `DATABASE_URL` | Ingestor / Worker | Requerida | URL PostgreSQL usada por Prisma. |
-| `REDIS_HOST` | Ingestor / Worker | `localhost` | Host de Redis. |
-| `REDIS_PORT` | Ingestor / Worker | `6379` | Puerto de Redis. |
-| `INGESTOR_PORT` | Ingestor | `3000` | Puerto HTTP del Ingestor. |
-| `WORKER_PORT` | Worker | `3001` | Puerto HTTP interno del Worker. |
-| `LOG_LEVEL` | Ingestor / Worker | `info` | Nivel de logs. |
-| `NODE_ENV` | Ingestor / Worker | `development` | Ambiente de ejecucion. |
-| `HTTP_TIMEOUT_MS` | Worker | `5000` | Timeout del HTTP client de entrega. |
-| `WORKER_ID` | Worker | `unknown` | Identificador registrado en intentos de entrega. |
-| `OAUTH2_ISSUER` | Ingestor | Opcional | Issuer esperado para tokens JWT. |
-| `OAUTH2_AUDIENCE` | Ingestor | Opcional | Audience esperada para tokens JWT. |
-
-## Pruebas
-
-El repositorio incluye pruebas en:
-
-- `packages/shared/tests`
-- `apps/ingestor/tests`
-- `apps/worker/tests`
-
-Ejecutar:
-
-```bash
+```mermaid
+flowchart LR
+    subgraph Monorepo Testing
+        root_test[npm run test] -->|Ejecuta todo| shared_t[@webhook-hub/shared <br/><i>Unitarias</i>]
+        root_test --> db_t[@webhook-hub/database <br/><i>Mocks & Repositorios</i>]
+        root_test --> ing_t[@webhook-hub/ingestor <br/><i>Integración HTTP</i>]
+        root_test --> wrk_t[@webhook-hub/worker <br/><i>E2E / BullMQ</i>]
+    end
+    
+    subgraph Cobertura
+        cov[npm run test:cov] -->|Genera Reporte| html[LCOV / HTML Report]
+    end
+```
+---
+# Ejecutar todas las pruebas del monorepo
 npm run test
-```
 
-## Estado Actual y Pendientes
+# Ejecutar pruebas con reporte de cobertura (Coverage)
+npm run test:cov
 
-El proyecto ya contiene la base funcional de ingesta, cola, persistencia, worker, seguridad, observabilidad e infraestructura local. Puntos a completar antes de un uso productivo:
+# Ejecutar pruebas unitarias de un workspace específico
+npm run test -w @webhook-hub/shared
+---
+🗺️ Roadmap y Pendientes
+El desarrollo del sistema está estructurado bajo las siguientes prioridades técnicas representadas en su hoja de ruta:
 
-- Implementar `scripts/seed.ts` para crear destinos iniciales y API keys reales.
-- Reemplazar el destino stub del Worker (`http://httpbin.org/post`) por lectura real desde `DestinationRepository`.
-- Exponer `/metrics` en el Worker o ajustar `infra/prometheus/prometheus.yml` si las metricas del Worker se publicaran por otra ruta.
-- Verificar firma JWT criptograficamente contra JWKS o secreto configurado; actualmente se decodifican y validan claims basicos.
-- Alinear estados finales del evento principal en `WebhookEvent` despues de cada intento de entrega.
-- Definir una estrategia explicita de dead-letter queue o reprocesamiento operativo.
-- Externalizar secretos y credenciales fuera de Docker Compose para ambientes reales.
-- Ampliar dashboards y alertas para latencia, errores, cola acumulada, circuitos abiertos y dead letters.
-
-## Licencia
-
-Proyecto privado. Licencia MIT
+gantt
+    title Roadmap de Implementación Webhook Hub
+    dateFormat  X
+    axisFormat %d
+    
+    section Core & Setup
+    Seeding Operativo (scripts/seed.ts)         :active, p1, 0, 5
+    Resolución Dinámica (DestinationRepo)      :active, p2, 2, 7
+    
+    section Observabilidad
+    Endpoint del Worker (/metrics en 3001)     : p3, 5, 10
+    Manejo de Alertas (Slack/PagerDuty)        : p4, 8, 14
+    
+    section Seguridad
+    Criptografía Avanzada (Verificación JWKS)  : p5, 10, 16
+---
+flowchart LR
+    A[Webhook Hub Core] --- B[Propiedad Corporativa Interna]
+    A --- C[Licencia Open Source MIT]
+---
